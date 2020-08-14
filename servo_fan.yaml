@@ -1,0 +1,1064 @@
+esphome:
+  name: $device_name
+  platform: ESP8266
+  board: nodemcuv2
+  on_boot:
+    priority: -100
+    then:
+      - lambda:
+          id(sensor_angle_horizontal).publish_state(id(angle_horizontal));
+          id(sensor_angle_vertical).publish_state(id(angle_vertical));
+
+substitutions:
+  device_name: servo_fan
+  ha_name: Servo Fan
+  wifi_reboot_timeout: 0s
+  api_reboot_timeout: 0s
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  reboot_timeout: $wifi_reboot_timeout
+  power_save_mode: none
+
+  ap:
+    ssid: "${device_name} Fallback AP"
+    password: !secret fallback_ap_password
+
+
+captive_portal:
+
+# Enable logging
+logger:
+  level: DEBUG
+  baud_rate: 0
+
+# Enable Home Assistant API
+api:
+  reboot_timeout: $api_reboot_timeout
+
+ota:
+
+servo:
+  - id: servo_horizontal
+    output: pwm_servo_horizontal
+    min_level: 2%
+    idle_level: 7.5%
+    max_level: 12%
+    restore: true
+  - id: servo_vertical
+    output: pwm_servo_vertical
+    min_level: 2%
+    idle_level: 7.5%
+    max_level: 12%
+    restore: true
+
+i2c:
+  sda: D2
+  scl: D1
+  scan: True
+
+globals:
+  - id: shadow_power
+    type: boolean
+    restore_value: false
+    initial_value: 'false'
+  - id: shadow_light
+    type: boolean
+    restore_value: true
+    initial_value: 'true'
+  - id: shadow_power_saving
+    type: boolean
+    restore_value: true
+    initial_value: 'false'
+  - id: light_on_effect
+    type: int
+    restore_value: true
+    initial_value: '1'
+  - id: fan_level
+    type: int
+    restore_value: true
+    initial_value: '1'
+  - id: fan_level_1
+    type: float
+    restore_value: false
+    initial_value: '0.01'
+  - id: fan_level_2
+    type: float
+    restore_value: false
+    initial_value: '0.30'
+  - id: fan_level_3
+    type: float
+    restore_value: false
+    initial_value: '1.0'
+  - id: angle_horizontal
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: angle_vertical
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: angle_horizontal_now
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: angle_vertical_now
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: shadow_oscillation_horizontal
+    type: boolean
+    restore_value: true
+    initial_value: 'false'
+  - id: shadow_oscillation_vertical
+    type: boolean
+    restore_value: true
+    initial_value: 'false'
+  - id: oscillation_horizontal
+    type: int
+    restore_value: true
+    initial_value: '30'
+  - id: oscillation_vertical
+    type: int
+    restore_value: true
+    initial_value: '30'
+  - id: oscillation_horizontal_bias
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: oscillation_vertical_bias
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: is_h_rotating
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: is_v_rotating
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+
+interval:
+  - interval: 50ms
+    then:
+      lambda: |-
+          if(!id(switch_power).state)
+            return;
+          if(id(angle_horizontal_now) != id(angle_horizontal))
+          {
+            id(is_h_rotating) = true;
+            if(id(angle_horizontal_now) < id(angle_horizontal))
+            {
+              id(angle_horizontal_now) += 10;
+              id(servo_horizontal).write((float)id(angle_horizontal_now)/1000);
+              id(sensor_angle_horizontal).publish_state(id(angle_horizontal_now));
+            }
+            else
+            {
+              id(angle_horizontal_now) -= 10;
+              id(servo_horizontal).write((float)id(angle_horizontal_now)/1000);
+              id(sensor_angle_horizontal).publish_state(id(angle_horizontal_now));
+            }
+          }
+          else
+            id(is_h_rotating) = false;
+          if(id(angle_vertical_now) != id(angle_vertical))
+          {
+            id(is_v_rotating) = true;
+            if(id(angle_vertical_now) < id(angle_vertical))
+            {
+              id(angle_vertical_now) += 10;
+              id(servo_vertical).write((float)id(angle_vertical_now)/1000);
+              id(sensor_angle_vertical).publish_state(id(angle_vertical_now));
+            }
+            else
+            {
+              id(angle_vertical_now) -= 10;
+              id(servo_vertical).write((float)id(angle_vertical_now)/1000);
+              id(sensor_angle_vertical).publish_state(id(angle_vertical_now));
+            }
+          }
+          else
+            id(is_v_rotating) = false;
+  - interval: 150ms 
+    then:
+      lambda: |-
+        if(!id(switch_power).state)
+          return;
+        static boolean horizontal_increase = true;
+        static boolean vertical_increase = true;
+        if(id(switch_oscillation_horizontal).state && !id(is_h_rotating))
+        {
+          int next_angle;
+          if(horizontal_increase)
+          {
+              id(oscillation_horizontal_bias) += 4;
+              next_angle = id(angle_horizontal) + id(oscillation_horizontal_bias);
+              if(next_angle > 1000)
+              {
+                next_angle = 1000;
+                horizontal_increase = false;
+              }
+              else if(id(oscillation_horizontal_bias) > id(oscillation_horizontal))
+              {
+                horizontal_increase = false;
+              }
+          }
+          else
+          {
+              id(oscillation_horizontal_bias) -= 4;
+              next_angle = id(angle_horizontal) + id(oscillation_horizontal_bias);
+              if(next_angle < -1000)
+              {
+                next_angle = -1000;
+                horizontal_increase = true;
+              }
+              else if(id(oscillation_horizontal_bias) < -1 * id(oscillation_horizontal))
+              {
+                horizontal_increase = true;
+              }
+          }
+          id(servo_horizontal).write((float)next_angle/1000);
+        }
+
+        if(id(switch_oscillation_vertical).state && !id(is_v_rotating))
+        {
+          int next_angle;
+          if(vertical_increase)
+          {
+              id(oscillation_vertical_bias) += 4;
+              next_angle = id(angle_vertical) + id(oscillation_vertical_bias);
+              if(next_angle > 1000)
+              {
+                next_angle = 1000;
+                vertical_increase = false;
+              }
+              else if(id(oscillation_vertical_bias) > id(oscillation_vertical))
+              {
+                vertical_increase = false;
+              }
+
+          }
+          else
+          {
+              id(oscillation_vertical_bias) -= 4;
+              next_angle = id(angle_vertical) + id(oscillation_vertical_bias);
+              if(next_angle < -1000)
+              {
+                next_angle = -1000;
+                vertical_increase = true;
+              }
+              else if(id(oscillation_vertical_bias) < -1 * id(oscillation_vertical))
+              {
+                vertical_increase = true;
+              }
+          }
+          id(servo_vertical).write((float)next_angle/1000);
+        }
+  - interval: 100ms
+    then:
+      lambda: |-
+        if(!id(shadow_power) || id(fan_level) < 4)
+          return;
+
+        static boolean natural_windw_increase = true;
+        static float natural_window_peak = 0.01;
+        static int natural_wind_count_down = 10;
+
+        if(natural_wind_count_down == 0)
+        {
+          if(natural_windw_increase)
+          {
+            float pwm = id(sensor_fan_speed).state / 100 + 0.01;
+            if(pwm > 1)
+              pwm = 1;
+            id(pwm_dc).set_level(pwm);
+            id(sensor_fan_speed).publish_state(pwm);
+            if(pwm >= natural_window_peak)
+            {
+              natural_windw_increase = false;
+              ESP_LOGW("FAN", "natural REACH PEAK");
+            }
+          }
+          else
+          {
+            float pwm = id(sensor_fan_speed).state / 100 - 0.01;
+            if(pwm < id(fan_level_1))
+              pwm = id(fan_level_1);
+            id(pwm_dc).set_level(pwm);
+            id(sensor_fan_speed).publish_state(pwm);
+            if(pwm <= id(fan_level_1))
+            {
+              natural_windw_increase = true;
+              ESP_LOGW("FAN", "natural REACH BOTTOM");
+              natural_wind_count_down = 100 + rand() % 200;
+              natural_window_peak = float(rand() % 50) / 100 + 0.4;
+              id(pwm_dc).set_level(id(fan_level_1));
+              id(sensor_fan_speed).publish_state(id(fan_level_1));
+            }
+          }
+        }
+        else
+        {
+          --natural_wind_count_down;
+          //if(id(fan_level) == 4)
+          //{
+          //  if(id(sensor_fan_speed).state != id(fan_level_1) * 100)
+          //  {
+          //    id(pwm_dc).set_level(id(fan_level_1));
+          //    id(sensor_fan_speed).publish_state(id(fan_level_1));
+          //  }
+          //}
+        }
+
+script:
+  - id: change_fan_mode
+    then:
+      - lambda: |-
+          if(!id(shadow_power))
+          {
+            id(pwm_dc).turn_off();
+            id(sensor_fan_speed).publish_state(0);
+          }
+          else if(id(fan_level) == 1)
+          {
+            id(pwm_dc).set_level(1.0);
+            //delay(2000);
+            id(pwm_dc).set_level(id(fan_level_1));
+            id(sensor_fan_speed).publish_state(id(fan_level_1));
+          }
+          else if(id(fan_level) == 2)
+          {
+            id(pwm_dc).set_level(id(fan_level_2));
+            id(sensor_fan_speed).publish_state(id(fan_level_2));
+          }
+          else if(id(fan_level) == 3)
+          {
+            id(pwm_dc).set_level(id(fan_level_3));
+            id(sensor_fan_speed).publish_state(id(fan_level_3));
+          }
+  - id: change_light_effect
+    then:
+      - lambda: |-
+          if(id(switch_power).state && id(switch_light).state)
+          {
+            auto call = id(light_rgb).turn_on();
+            switch(id(light_on_effect))
+            {
+              case 1: 
+              {
+                call.set_effect("Default");
+                call.set_brightness(0.4);
+                break;
+              }
+              case 2: 
+              {
+                call.set_effect("ONE Breathing");
+                call.set_brightness(0.4);
+                break;
+              }
+            }
+            call.perform();
+          }
+          else
+          {
+            auto call = id(light_rgb).turn_off();
+            call.perform();
+          }
+
+output:
+  - platform: esp8266_pwm
+    id: pwm_servo_horizontal
+    pin: D3
+    frequency: 50 Hz
+  - platform: esp8266_pwm
+    id: pwm_servo_vertical
+    pin: D4
+    frequency: 50 Hz
+  - platform: esp8266_pwm
+    id: pwm_dc
+    pin: D5
+    frequency: 300 Hz
+
+binary_sensor:
+  - platform: gpio
+    name: "${ha_name} Button 1"
+    internal: True
+    pin:
+      pcf8574: pcf8574_hub
+      number: 7
+      mode: INPUT
+      inverted: True
+    on_click:
+      lambda: |-
+        id(switch_power).toggle();
+  - platform: gpio
+    name: "${ha_name} Button 2"
+    internal: True
+    pin:
+      pcf8574: pcf8574_hub
+      number: 6
+      mode: INPUT
+      inverted: True
+    on_click:
+      lambda: |-
+        if(id(switch_power).state)
+        {
+          if(id(fan_level) == 1)
+            id(fan_level) = 2;
+          else if(id(fan_level) == 2)
+            id(fan_level) = 3;
+          else
+            id(fan_level) = 1;
+          id(change_fan_mode).execute();
+        }
+  - platform: gpio
+    name: "${ha_name} Button 3"
+    internal: True
+    pin:
+      pcf8574: pcf8574_hub
+      number: 5
+      mode: INPUT
+      inverted: True
+    on_click:
+      lambda: |-
+        if(id(switch_power).state)
+          id(fan_level) = 4;
+  - platform: gpio
+    name: "${ha_name} Button 4"
+    internal: True
+    pin:
+      pcf8574: pcf8574_hub
+      number: 4
+      mode: INPUT
+      inverted: True
+    on_release:
+      then:
+        - servo.write:
+            id: servo_vertical
+            level: -0.5
+  - platform: gpio
+    name: "${ha_name} PIR"
+    id: binary_sensor_pir
+    internal: True
+    pin:
+      pcf8574: pcf8574_hub
+      number: 0
+      mode: INPUT
+      inverted: False
+  - platform: template
+    id : "sensor_human_detection"
+    device_class: motion
+    name: "${ha_name} Human Detection"
+    lambda: |-
+      return id(binary_sensor_pir).state;
+    filters:
+      - delayed_off: 15s
+    on_press:
+      - lambda: |-
+          if(id(shadow_power_saving))
+            id(change_fan_mode).execute();
+    on_release:
+      - lambda: |-
+          if(id(shadow_power_saving))
+          {
+            id(pwm_dc).turn_off();
+            id(sensor_fan_speed).publish_state(0);
+          }
+  - platform: remote_receiver
+    id: remote_f1
+    nec:
+      address: 0xCD32
+      command: 0xB34C
+    filters:
+      - delayed_off: 100ms
+    on_release:
+      then:
+        - lambda: |-
+            id(switch_power).toggle();
+  - platform: remote_receiver
+    id: remote_f2
+    nec:
+      address: 0xCD32
+      command: 0x8976
+    filters:
+      - delayed_off: 100ms
+    on_release:
+      then:
+        - lambda: |-
+            if(id(switch_power).state)
+            {
+              if(id(fan_level) == 1)
+                id(fan_level) = 2;
+              else if(id(fan_level) == 2)
+                id(fan_level) = 3;
+              else
+                id(fan_level) = 1;
+              id(change_fan_mode).execute();
+            }
+  - platform: remote_receiver
+    id: remote_f3
+    nec:
+      address: 0xCD32
+      command: 0xC13E
+    filters:
+      - delayed_off: 100ms
+    on_release:
+      then:
+        - lambda: |-
+            if(id(switch_power).state)
+              id(fan_level) = 4;
+  - platform: remote_receiver
+    id: remote_f4
+    nec:
+      address: 0xCD32
+      command: 0xC33C
+    filters:
+      - delayed_off: 100ms
+    on_release:
+      then:
+        - lambda: |-
+            id(switch_hand).turn_on();
+  - platform: remote_receiver
+    id: remote_left
+    # nec:
+    #   address: 0xCD32
+    #   command: 0xA15E
+    sony:
+      data: 0x000002D0 
+      nbits: 12
+    filters:
+      - delayed_off: 100ms
+    on_release:
+      then:
+        - lambda: |-
+            id(switch_left).turn_on();
+  - platform: remote_receiver
+    id: remote_skip_right
+    # nec:
+    #   address: 0xCD32
+    #   command: 0x619E
+    sony:
+      data: 0x00000CD0 
+      nbits: 12
+    filters:
+      - delayed_off: 100ms
+    on_release:
+      then:
+        - lambda: |-
+            id(switch_right).turn_on();
+  - platform: remote_receiver
+    id: remote_down
+    # nec:
+    #   address: 0xCD32
+    #   command: 0x817E
+    sony:
+      data: 0x00000AF0 
+      nbits: 12
+    filters:
+      - delayed_off: 100ms
+    on_release:
+      then:
+        - lambda: |-
+            id(switch_down).turn_on();
+  - platform: remote_receiver
+    id: remote_up
+    # nec:
+    #   address: 0xCD32
+    #   command: 0x01FE
+    sony:
+      data: 0x000002F0 
+      nbits: 12
+    filters:
+      - delayed_off: 100ms
+    on_release:
+      then:
+        - lambda: |-
+            id(switch_up).turn_on();
+  - platform: remote_receiver
+    id: remote_volume_up
+    # nec:
+    #   address: 0xCD32
+    #   command: 0x01FE
+    sony:
+      data: 0x00000490
+      nbits: 12
+    filters:
+      - delayed_off: 100ms
+    on_release:
+      then:
+        - lambda: |-
+            id(switch_speed_up).turn_on();
+  - platform: remote_receiver
+    id: remote_volume_down
+    # nec:
+    #   address: 0xCD32
+    #   command: 0x01FE
+    sony:
+      data: 0x00000C90
+      nbits: 12
+    filters:
+      - delayed_off: 100ms
+    on_release:
+      then:
+        - lambda: |-
+            id(switch_speed_down).turn_on();
+
+remote_receiver:
+  pin:
+    number: D7
+    inverted: True
+    mode: INPUT_PULLUP
+  dump: sony
+
+pcf8574:
+  - id: 'pcf8574_hub'
+    address: 0x20
+    pcf8575: False
+
+light:
+  - platform: neopixelbus
+    variant: WS2812
+    id: light_rgb
+    pin: GPIO03
+    internal: True
+    num_leds: 8
+    name: "${ha_name} FastLED"
+    effects:
+      - addressable_lambda:
+          name: "Default"
+          update_interval: 16ms
+          lambda: |-
+            ESPHSVColor hsv;
+            hsv.value = 255;
+            hsv.saturation = 240;
+            uint16_t hue = (millis() * 10) % 0xFFFF;
+            const uint16_t add = 0xFFFF / 50;
+
+            int index = 0;
+            switch(id(fan_level))
+            {
+              case 1: index = 6; break;
+              case 2: index = 4; break;
+              case 3: index = 2; break;
+              case 4: index = 1; break;
+            }
+
+            if(id(sensor_human_detection).state)
+            {
+              hsv.hue = hue >> 8;
+              it[0] = hsv;
+            }
+            else
+              it[0] = ESPColor(70, 70, 70);
+
+            for(int i = index; i < 8 ; ++i)
+            {
+              hsv.hue = hue >> 8;
+              it[i] = hsv;
+              hue += add;
+            }
+
+            it.range(1, index) = ESPColor::BLACK;
+      - addressable_lambda:
+          name: "ONE Breathing"
+          update_interval: 16ms
+          lambda: |-
+            static int color = 50;
+            static bool increase = true;
+
+            if (increase)
+              color += 3;
+            else
+              color -= 3;
+            if (color > 200)
+              increase = false;
+            else if (color < -125)
+              increase = true;
+
+            if (color > 0)
+            {
+              it[7] = ESPColor(color, color, color);
+              if(id(sensor_human_detection).state)
+                it[0] = ESPColor(color, 0, 0);
+              else
+                it[0] = ESPColor(70, 70, 70);
+              
+              it.range(1, 7) = ESPColor::BLACK;
+            }
+
+sensor:
+  - platform: aht10
+    address: 0x38
+    temperature:
+      name: "${ha_name} Env Temperature"
+      id: sensor_env_temp
+      accuracy_decimals: 1
+    humidity:
+      name: "${ha_name} Env Humidity"
+      id: sensor_env_humidity
+      accuracy_decimals: 1
+    update_interval: 5s
+  - platform: template
+    name: "${ha_name} Fan Speed"
+    id : sensor_fan_speed
+    icon: 'mdi:fan'
+    unit_of_measurement: '%'
+    accuracy_decimals: 1
+    filters:
+      - lambda: |-
+          if(x<0)
+            return 0;
+          else
+            return x > 1 ? 100 : x * 100;
+    lambda: |-
+      return {};
+  - platform: template
+    name: "${ha_name} Angle Horizontal"
+    id : "sensor_angle_horizontal"
+    icon: 'mdi:swap-horizontal-bold'
+    unit_of_measurement: '°'
+    accuracy_decimals: 0
+    filters:
+      - lambda: |-
+          return x / 100 * 18;
+    lambda: |-
+      return {};
+  - platform: template
+    name: "${ha_name} Angle Vertical"
+    id : "sensor_angle_vertical"
+    icon: 'mdi:swap-vertical-bold'
+    unit_of_measurement: '°'
+    accuracy_decimals: 0
+    filters:
+      - lambda: |-
+          return x / 100 * 18;
+    lambda: |-
+      return {};
+  - platform: uptime
+    name: "${ha_name} uptime"
+    filters:
+          - lambda: return x / 3600;
+    unit_of_measurement: "H"
+    accuracy_decimals: 1
+
+switch:
+  - platform: template
+    name: "${ha_name} Power Saving"
+    icon: 'mdi:brightness-auto'
+    lambda: |-
+      return id(shadow_power_saving) && id(switch_power).state;
+    turn_on_action:
+      - lambda: |-
+          if(id(switch_power).state)
+            id(shadow_power_saving) = true;
+    turn_off_action:
+      - lambda: |-
+          if(id(switch_power).state)
+            id(shadow_power_saving) = false;
+    on_turn_off:
+      - lambda: |-
+          id(change_fan_mode).execute();
+  - platform: template
+    name: "${ha_name} Power"
+    icon: 'mdi:power'
+    id: switch_power
+    lambda: |-
+      return id(shadow_power);
+    turn_on_action:
+      - lambda: |-
+          id(shadow_power) = true;
+    turn_off_action:
+      - lambda: |-
+          id(shadow_power) = false;
+    on_turn_on:
+      - lambda: |-
+          id(change_fan_mode).execute();
+
+          //auto call = id(light_rgb).turn_on();
+          //call.set_effect("Default");
+          //call.set_brightness(0.4);
+          //call.perform();
+
+          id(pwm_dc).set_level(1.0);
+          id(sensor_fan_speed).publish_state(100);
+
+          id(change_light_effect).execute();
+    on_turn_off:
+      - lambda: |-
+          id(change_fan_mode).execute();
+
+          //auto call = id(light_rgb).turn_off();
+          //call.perform();
+          id(servo_horizontal).detach();
+          id(servo_vertical).detach();
+
+          id(change_light_effect).execute();
+  - platform: template
+    name: "${ha_name} Light"
+    icon: 'mdi:vanity-light'
+    id: switch_light
+    lambda: |-
+      return id(switch_power).state && id(shadow_light);
+    turn_on_action:
+      - lambda: |-
+          if(!id(switch_power).state)
+            return;
+          id(shadow_light) = true;
+    turn_off_action:
+      - lambda: |-
+          id(shadow_light) = false;
+    on_turn_on:
+      - lambda: |-
+          id(change_light_effect).execute();
+    on_turn_off:
+      - lambda: |-
+          id(change_light_effect).execute();
+  - platform: template
+    name: "${ha_name} Level 1"
+    icon: 'mdi:numeric-1-circle'
+    lambda: |-
+      return id(switch_power).state && id(fan_level) == 1;
+    turn_on_action:
+      - lambda: |-
+          id(fan_level) = 1;
+          if(!id(switch_power).state)
+            id(switch_power).turn_on();
+    on_turn_on:
+      - lambda: |-
+          id(change_fan_mode).execute();
+  - platform: template
+    name: "${ha_name} Level 2"
+    icon: 'mdi:numeric-2-circle'
+    lambda: |-
+      return id(switch_power).state && id(fan_level) == 2;
+    turn_on_action:
+      - lambda: |-
+          id(fan_level) = 2;
+          if(!id(switch_power).state)
+            id(switch_power).turn_on();
+    on_turn_on:
+      - lambda: |-
+          id(change_fan_mode).execute();
+  - platform: template
+    name: "${ha_name} Level 3"
+    icon: 'mdi:numeric-3-circle'
+    lambda: |-
+      return id(switch_power).state && id(fan_level) == 3;
+    turn_on_action:
+      - lambda: |-
+          id(fan_level) = 3;
+          if(!id(switch_power).state)
+            id(switch_power).turn_on();
+    on_turn_on:
+      - lambda: |-
+          id(change_fan_mode).execute();
+  - platform: template
+    name: "${ha_name} Natural Mode"
+    icon: 'mdi:leaf'
+    lambda: |-
+      return id(switch_power).state && id(fan_level) == 4;
+    turn_on_action:
+      - lambda: |-
+          id(fan_level) = 4;
+          if(!id(switch_power).state)
+            id(switch_power).turn_on();
+  - platform: template
+    name: "${ha_name} Right"
+    id: switch_right
+    icon: 'mdi:arrow-right-bold-box'
+    lambda: |-
+      return false;
+    turn_on_action:
+      lambda: |-
+        id(angle_horizontal) = id(angle_horizontal) - 100;
+        if(id(angle_horizontal) < -1000)
+          id(angle_horizontal) = -1000;
+  - platform: template
+    name: "${ha_name} Left"
+    id: switch_left
+    icon: 'mdi:arrow-left-bold-box'
+    lambda: |-
+      return false;
+    turn_on_action:
+      lambda: |-
+        id(angle_horizontal) = id(angle_horizontal) + 100;
+        if(id(angle_horizontal) > 1000)
+          id(angle_horizontal) = 1000;
+  - platform: template
+    name: "${ha_name} Up"
+    id: switch_up
+    icon: 'mdi:arrow-up-bold-box'
+    lambda: |-
+      return false;
+    turn_on_action:
+      lambda: |-
+        id(angle_vertical) = id(angle_vertical) + 100;
+        if(id(angle_vertical) > 1000)
+          id(angle_vertical) = 1000;
+  - platform: template
+    name: "${ha_name} Down"
+    id: switch_down
+    icon: 'mdi:arrow-down-bold-box'
+    lambda: |-
+      return false;
+    turn_on_action:
+      lambda: |-
+        id(angle_vertical) = id(angle_vertical) - 100;
+        if(id(angle_vertical) < -1000)
+          id(angle_vertical) = -1000;
+  - platform: template
+    name: "${ha_name} Center"
+    id: switch_center
+    icon: 'mdi:image-filter-center-focus'
+    lambda: |-
+      return id(switch_power).state && id(angle_horizontal) == 0 &&
+      id(angle_vertical) == -600;
+    turn_on_action:
+      lambda: |-
+        id(angle_horizontal) = 0;
+        id(angle_vertical) = -600;
+  - platform: template
+    name: "${ha_name} Speed Up"
+    id: switch_speed_up
+    icon: 'mdi:speedometer'
+    lambda: |-
+      return false;
+    turn_on_action:
+      lambda: |-
+        float new_speed = id(sensor_fan_speed).state / 100 + 0.05;
+        if(new_speed > 1)
+          new_speed = 1;
+        id(pwm_dc).set_level(new_speed);
+        id(sensor_fan_speed).publish_state(new_speed);
+  - platform: template
+    name: "${ha_name} Speed Down"
+    id: switch_speed_down
+    icon: 'mdi:speedometer-slow'
+    lambda: |-
+      return false;
+    turn_on_action:
+      lambda: |-
+        float new_speed = id(sensor_fan_speed).state / 100 - 0.05;
+        if(new_speed < 0)
+          new_speed = 0;
+        id(pwm_dc).set_level(new_speed);
+        id(sensor_fan_speed).publish_state(new_speed);
+  - platform: template
+    name: "${ha_name} Hand"
+    id: switch_hand
+    icon: 'mdi:hand'
+    lambda: |-
+      return id(angle_vertical) == -900 && id(angle_horizontal)==-600 && id(switch_power).state;
+    turn_on_action:
+      lambda: |-
+        if(!id(switch_power).state)
+          id(switch_power).turn_on();
+        id(angle_vertical) = -900;
+        id(angle_horizontal) = -600;
+  - platform: template
+    name: "${ha_name} Oscillation Horizontal"
+    id: switch_oscillation_horizontal
+    icon: 'mdi:arrow-expand-horizontal'
+    lambda: |-
+      return id(switch_power).state && id(shadow_oscillation_horizontal);
+    turn_on_action:
+      lambda: |-
+        if(!id(switch_power).state)
+          return;
+        id(shadow_oscillation_horizontal) = true;
+        id(oscillation_horizontal_bias) = 0;
+    turn_off_action:
+      lambda: |-
+        id(shadow_oscillation_horizontal) = false;
+        id(angle_horizontal) = id(angle_horizontal) + id(oscillation_horizontal_bias);
+        id(angle_horizontal_now) = id(angle_horizontal);
+  - platform: template
+    name: "${ha_name} Oscillation Horizontal 30"
+    icon: 'mdi:arrow-expand-horizontal'
+    lambda: |-
+      return id(switch_power).state && id(oscillation_horizontal) == 300;
+    turn_on_action:
+      lambda: |-
+        if(id(switch_power).state)
+          id(oscillation_horizontal) = 300;
+  - platform: template
+    name: "${ha_name} Oscillation Horizontal 60"
+    icon: 'mdi:arrow-expand-horizontal'
+    lambda: |-
+      return id(switch_power).state && id(oscillation_horizontal) == 600;
+    turn_on_action:
+      lambda: |-
+        if(id(switch_power).state)
+          id(oscillation_horizontal) = 600;
+  - platform: template
+    name: "${ha_name} Oscillation Vertical"
+    icon: 'mdi:arrow-expand-vertical'
+    id: switch_oscillation_vertical
+    lambda: |-
+      return id(switch_power).state && id(shadow_oscillation_vertical);
+    turn_on_action:
+      lambda: |-
+        if(!id(switch_power).state)
+          return;
+        id(shadow_oscillation_vertical) = true;
+        id(oscillation_vertical_bias) = 0;
+    turn_off_action:
+      lambda: |-
+        id(shadow_oscillation_vertical) = false;
+        id(angle_vertical) = id(angle_vertical) + id(oscillation_vertical_bias);
+        id(angle_vertical_now) = id(angle_vertical);
+  - platform: template
+    name: "${ha_name} Oscillation Vertical 30"
+    icon: 'mdi:arrow-expand-vertical'
+    lambda: |-
+      return id(switch_power).state && id(oscillation_vertical) == 300;
+    turn_on_action:
+      lambda: |-
+        if(id(switch_power).state)
+          id(oscillation_vertical) = 300;
+  - platform: template
+    name: "${ha_name} Oscillation Vertical 60"
+    icon: 'mdi:arrow-expand-vertical'
+    lambda: |-
+      return id(switch_power).state && id(oscillation_vertical) == 600;
+    turn_on_action:
+      lambda: |-
+        if(id(switch_power).state)
+          id(oscillation_vertical) = 600;
+  - platform: template
+    name: "${ha_name} Light Rainbow"
+    id: switch_light_rainbow
+    icon: 'mdi:looks'
+    lambda: |-
+      return id(switch_light).state && id(light_on_effect) == 1;
+    turn_on_action:
+      - lambda: |-
+          if(!id(switch_light).state)
+            return;
+          id(light_on_effect) = 1;
+          id(change_light_effect).execute();
+
+  - platform: template
+    name: "${ha_name} Light Indicator"
+    id: "switch_light_indicator"
+    icon: 'mdi:lightbulb-on'
+    lambda: |-
+      return id(switch_light).state && id(light_on_effect) == 2;
+    turn_on_action:
+      - lambda: |-
+          if(!id(switch_light).state)
+            return;
+          id(light_on_effect) = 2;
+          id(change_light_effect).execute();
+
+  - platform: gpio
+    name: "${ha_name} Relay"
+    pin:
+      pcf8574: pcf8574_hub
+      number: 1
+      mode: OUTPUT
+      inverted: False
